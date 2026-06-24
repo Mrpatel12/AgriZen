@@ -1,0 +1,9 @@
+django>=4.2,<5.0
+djangorestframework
+django-filter
+djangorestframework-simplejwt
+drf-spectacular
+psycopg2-binary
+celery
+redis
+gunicorn
