@@ -1,5 +1,7 @@
 import random
 import requests
+from django.core.mail import send_mail
+from django.conf import settings
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, viewsets, permissions, filters
@@ -12,7 +14,7 @@ from django.utils import timezone
 
 from .models import (
     Profile, Farm, Crop, Inventory, Expense, Revenue, 
-    Worker, Attendance, TaskAssignment, Notification
+    Worker, Attendance, TaskAssignment, Notification, OTPVerification
 )
 from .serializers import (
     UserRegisterSerializer, UserSerializer, ProfileSerializer, 
@@ -41,8 +43,97 @@ class RegisterView(APIView):
         if serializer.is_valid():
             user = serializer.save()
             Profile.objects.create(user=user)
-            return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
+            
+            # Generate OTP
+            otp_code = f"{random.randint(100000, 999999)}"
+            OTPVerification.objects.update_or_create(
+                email=user.email,
+                defaults={'otp_code': otp_code, 'created_at': timezone.now()}
+            )
+            
+            # Send Email
+            try:
+                send_mail(
+                    subject="Verify your AgriZen Account",
+                    message=f"Thank you for registering at AgriZen.\n\nYour 6-digit verification code is: {otp_code}\n\nThis code is valid for 5 minutes.",
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[user.email],
+                    fail_silently=False,
+                )
+            except Exception as e:
+                # Log email failure but don't crash registration process
+                pass
+                
+            return Response({
+                "detail": "OTP sent to your email. Please verify.",
+                "email": user.email
+            }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class VerifyOTPView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email')
+        otp_code = request.data.get('otp_code')
+
+        if not email or not otp_code:
+            return Response({"detail": "Email and OTP code are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            otp_record = OTPVerification.objects.get(email=email)
+        except OTPVerification.DoesNotExist:
+            return Response({"detail": "Invalid OTP or Email."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if otp_record.is_expired():
+            return Response({"detail": "OTP has expired. Please request a new one."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if otp_record.otp_code != otp_code:
+            return Response({"detail": "Invalid OTP code."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+            user.is_active = True
+            user.save()
+            otp_record.delete()
+            return Response({"detail": "Email verified successfully. You can now log in."}, status=status.HTTP_200_OK)
+        except User.DoesNotExist:
+            return Response({"detail": "User not found."}, status=status.HTTP_404_NOT_FOUND)
+
+class ResendOTPView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get('email')
+        if not email:
+            return Response({"detail": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            return Response({"detail": "User with this email does not exist."}, status=status.HTTP_404_NOT_FOUND)
+
+        if user.is_active:
+            return Response({"detail": "This account is already verified and active."}, status=status.HTTP_400_BAD_REQUEST)
+
+        otp_code = f"{random.randint(100000, 999999)}"
+        OTPVerification.objects.update_or_create(
+            email=email,
+            defaults={'otp_code': otp_code, 'created_at': timezone.now()}
+        )
+
+        try:
+            send_mail(
+                subject="Verify your AgriZen Account - New OTP",
+                message=f"Your new AgriZen 6-digit verification code is: {otp_code}\n\nThis code is valid for 5 minutes.",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                fail_silently=False,
+            )
+            return Response({"detail": "A new OTP has been sent to your email."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"detail": f"Failed to send email: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class UserProfileView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -246,16 +337,16 @@ class DashboardStatsView(APIView):
         if role == 'ADMIN':
             total_users = User.objects.count()
             total_farms = Farm.objects.count()
-            total_expenses = Expense.objects.aggregate(Sum('amount'))['amount__sum'] or 0.0
-            total_revenues = Revenue.objects.aggregate(Sum('total_amount'))['total_amount__sum'] or 0.0
+            total_expenses = float(Expense.objects.aggregate(Sum('amount'))['amount__sum'] or 0.0)
+            total_revenues = float(Revenue.objects.aggregate(Sum('total_amount'))['total_amount__sum'] or 0.0)
             
             return Response({
                 'role': role,
                 'total_users': total_users,
                 'total_farms': total_farms,
-                'total_expenses': float(total_expenses),
-                'total_revenues': float(total_revenues),
-                'total_profit': float(total_revenues - total_expenses),
+                'total_expenses': total_expenses,
+                'total_revenues': total_revenues,
+                'total_profit': total_revenues - total_expenses,
             })
         
         # Farmer / Manager view
@@ -263,8 +354,8 @@ class DashboardStatsView(APIView):
         farm_ids = farms.values_list('id', flat=True)
 
         active_crops_count = Crop.objects.filter(farm_id__in=farm_ids, status__in=['PLANTED', 'GROWING']).count()
-        total_expenses = Expense.objects.filter(farm_id__in=farm_ids).aggregate(Sum('amount'))['amount__sum'] or 0.0
-        total_revenues = Revenue.objects.filter(farm_id__in=farm_ids).aggregate(Sum('total_amount'))['total_amount__sum'] or 0.0
+        total_expenses = float(Expense.objects.filter(farm_id__in=farm_ids).aggregate(Sum('amount'))['amount__sum'] or 0.0)
+        total_revenues = float(Revenue.objects.filter(farm_id__in=farm_ids).aggregate(Sum('total_amount'))['total_amount__sum'] or 0.0)
 
         recent_activities = []
         # Pull notifications as recent events
@@ -279,9 +370,9 @@ class DashboardStatsView(APIView):
         return Response({
             'role': role,
             'active_crops': active_crops_count,
-            'total_expenses': float(total_expenses),
-            'total_revenues': float(total_revenues),
-            'total_profit': float(total_revenues - total_expenses),
+            'total_expenses': total_expenses,
+            'total_revenues': total_revenues,
+            'total_profit': total_revenues - total_expenses,
             'recent_activities': recent_activities
         })
 

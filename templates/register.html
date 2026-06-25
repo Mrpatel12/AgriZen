@@ -12,6 +12,9 @@
         <div class="glass-card p-5 mx-auto" style="max-width: 450px;">
             <h2 class="text-center mb-4 fw-bold">Join <span class="text-gradient">AgriZen</span></h2>
             <div id="alertBox" class="alert alert-danger d-none"></div>
+            <div id="successBox" class="alert alert-success d-none"></div>
+            
+            <!-- Registration Form -->
             <form id="registerForm">
                 <div class="mb-3">
                     <label class="form-label text-secondary">Email Address</label>
@@ -30,17 +33,49 @@
                 </div>
                 <button type="submit" class="btn btn-success w-100 btn-lg mb-3">Sign Up</button>
             </form>
-            <p class="text-center text-secondary mb-0">Already have an account? <a href="/login/" class="text-success text-decoration-none">Sign In</a></p>
+
+            <!-- OTP Verification Form -->
+            <form id="otpForm" class="d-none">
+                <div class="mb-3 text-center">
+                    <p class="text-secondary small">We have sent a 6-digit verification code to <span id="sentEmail" class="text-white fw-bold"></span></p>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-secondary">Verification Code</label>
+                    <input type="text" id="otpCode" class="form-control bg-dark text-white border-secondary text-center fs-4" placeholder="123456" maxlength="6" pattern="\d{6}" required>
+                </div>
+                <button type="submit" class="btn btn-success w-100 btn-lg mb-3">Verify & Activate</button>
+                <button type="button" id="resendOtpBtn" class="btn btn-outline-secondary w-100 btn-sm">Resend OTP</button>
+            </form>
+
+            <p id="signInPrompt" class="text-center text-secondary mb-0 mt-3">Already have an account? <a href="/login/" class="text-success text-decoration-none">Sign In</a></p>
         </div>
     </div>
 
     <script>
-        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+        let registeredEmail = '';
+        const alertBox = document.getElementById('alertBox');
+        const successBox = document.getElementById('successBox');
+        const registerForm = document.getElementById('registerForm');
+        const otpForm = document.getElementById('otpForm');
+        const signInPrompt = document.getElementById('signInPrompt');
+
+        function showError(msg) {
+            successBox.classList.add('d-none');
+            alertBox.textContent = msg;
+            alertBox.classList.remove('d-none');
+        }
+
+        function showSuccess(msg) {
+            alertBox.classList.add('d-none');
+            successBox.textContent = msg;
+            successBox.classList.remove('d-none');
+        }
+
+        registerForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const email = document.getElementById('email').value;
             const password = document.getElementById('password').value;
             const role = document.getElementById('role').value;
-            const alertBox = document.getElementById('alertBox');
 
             try {
                 const response = await fetch('/api/v1/auth/register/', {
@@ -50,15 +85,64 @@
                 });
 
                 if (response.ok) {
-                    window.location.href = '/login/';
+                    const data = await response.json();
+                    registeredEmail = email;
+                    document.getElementById('sentEmail').textContent = email;
+                    registerForm.classList.add('d-none');
+                    otpForm.classList.remove('d-none');
+                    showSuccess(data.detail || 'OTP sent successfully! Please check your inbox.');
                 } else {
                     const errData = await response.json();
-                    alertBox.textContent = Object.values(errData).flat().join(' ') || 'Registration failed.';
-                    alertBox.classList.remove('d-none');
+                    showError(Object.values(errData).flat().join(' ') || 'Registration failed.');
                 }
             } catch (err) {
-                alertBox.textContent = 'Server connection failed.';
-                alertBox.classList.remove('d-none');
+                showError('Server connection failed.');
+            }
+        });
+
+        otpForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const otp_code = document.getElementById('otpCode').value;
+
+            try {
+                const response = await fetch('/api/v1/auth/verify-otp/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: registeredEmail, otp_code })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    showSuccess(data.detail || 'Verification successful! Redirecting to login...');
+                    setTimeout(() => {
+                        window.location.href = '/login/';
+                    }, 2000);
+                } else {
+                    const errData = await response.json();
+                    showError(errData.detail || 'Verification failed. Please try again.');
+                }
+            } catch (err) {
+                showError('Server connection failed.');
+            }
+        });
+
+        document.getElementById('resendOtpBtn').addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/v1/auth/resend-otp/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: registeredEmail })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    showSuccess(data.detail || 'New OTP sent to your email.');
+                } else {
+                    const errData = await response.json();
+                    showError(errData.detail || 'Failed to resend OTP.');
+                }
+            } catch (err) {
+                showError('Server connection failed.');
             }
         });
     </script>

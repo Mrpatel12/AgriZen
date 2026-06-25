@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    RegisterView, UserProfileView, FarmViewSet, CropViewSet, 
+    RegisterView, VerifyOTPView, ResendOTPView, UserProfileView, FarmViewSet, CropViewSet, 
     InventoryViewSet, ExpenseViewSet, RevenueViewSet, 
     WorkerViewSet, AttendanceViewSet, TaskAssignmentViewSet, 
     NotificationViewSet, WeatherView, MarketPriceView, 
@@ -21,6 +21,8 @@ router.register(r'notifications', NotificationViewSet, basename='notification')
 
 urlpatterns = [
     path('auth/register/', RegisterView.as_view(), name='register'),
+    path('auth/verify-otp/', VerifyOTPView.as_view(), name='verify-otp'),
+    path('auth/resend-otp/', ResendOTPView.as_view(), name='resend-otp'),
     path('auth/profile/', UserProfileView.as_view(), name='profile'),
     path('weather/', WeatherView.as_view(), name='weather'),
     path('market/', MarketPriceView.as_view(), name='market'),
