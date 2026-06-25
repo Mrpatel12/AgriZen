@@ -9,8 +9,8 @@ User = get_user_model()
 
 class AgriZenAuthTests(APITestCase):
 
-    def test_user_registration_and_otp_verification(self):
-        # 1. Register a new user (which will be inactive and generate an OTP)
+    def test_user_registration(self):
+        # Register a new user (which will be active immediately)
         url = reverse('register')
         data = {
             'email': 'farmer_test@agrizen.com',
@@ -21,53 +21,7 @@ class AgriZenAuthTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         
         user = User.objects.get(email='farmer_test@agrizen.com')
-        self.assertFalse(user.is_active)
-        
-        # Check that OTP record was created
-        from .models import OTPVerification
-        otp_record = OTPVerification.objects.get(email='farmer_test@agrizen.com')
-        self.assertEqual(len(otp_record.otp_code), 6)
-
-        # 2. Try verifying with wrong OTP
-        verify_url = reverse('verify-otp')
-        verify_data = {
-            'email': 'farmer_test@agrizen.com',
-            'otp_code': '000000'
-        }
-        verify_response = self.client.post(verify_url, verify_data, format='json')
-        self.assertEqual(verify_response.status_code, status.HTTP_400_BAD_REQUEST)
-        user.refresh_from_db()
-        self.assertFalse(user.is_active)
-
-        # 3. Verify with correct OTP
-        verify_data['otp_code'] = otp_record.otp_code
-        verify_response = self.client.post(verify_url, verify_data, format='json')
-        self.assertEqual(verify_response.status_code, status.HTTP_200_OK)
-        user.refresh_from_db()
         self.assertTrue(user.is_active)
-        self.assertFalse(OTPVerification.objects.filter(email='farmer_test@agrizen.com').exists())
-
-    def test_resend_otp(self):
-        # Register a user
-        url = reverse('register')
-        data = {
-            'email': 'resend_test@agrizen.com',
-            'password': 'test_secure_password123',
-            'role': 'FARMER'
-        }
-        self.client.post(url, data, format='json')
-
-        from .models import OTPVerification
-        first_otp = OTPVerification.objects.get(email='resend_test@agrizen.com').otp_code
-
-        # Resend OTP
-        resend_url = reverse('resend-otp')
-        resend_response = self.client.post(resend_url, {'email': 'resend_test@agrizen.com'}, format='json')
-        self.assertEqual(resend_response.status_code, status.HTTP_200_OK)
-
-        # Ensure the OTP changed or remains valid
-        second_otp = OTPVerification.objects.get(email='resend_test@agrizen.com').otp_code
-        self.assertEqual(len(second_otp), 6)
 
     def test_user_login(self):
         # Create user (by default, create_user sets is_active=True, so it remains backward compatible for testing log in)
